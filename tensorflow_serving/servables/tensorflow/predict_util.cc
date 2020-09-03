@@ -24,7 +24,6 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
 #include "tensorflow/cc/saved_model/signature_constants.h"
-#include "tensorflow/contrib/session_bundle/signature.h"
 #include "tensorflow/core/framework/tensor.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/protobuf/named_tensor.pb.h"
@@ -35,7 +34,8 @@ namespace serving {
 namespace {
 
 Status VerifySignature(const SignatureDef& signature) {
-  if (signature.method_name() != kPredictMethodName &&
+  if (GetSignatureMethodNameCheckFeature() &&
+      signature.method_name() != kPredictMethodName &&
       signature.method_name() != kClassifyMethodName &&
       signature.method_name() != kRegressMethodName) {
     return errors::Internal(strings::StrCat(
@@ -49,7 +49,7 @@ Status VerifySignature(const SignatureDef& signature) {
 template <typename T>
 std::set<string> GetMapKeys(const T& proto_map) {
   std::set<string> keys;
-  for (auto it : proto_map) {
+  for (const auto& it : proto_map) {
     keys.insert(it.first);
   }
   return keys;
@@ -181,10 +181,10 @@ Status PostProcessPredictionResult(
 namespace internal {
 Status RunPredict(
     const RunOptions& run_options, const MetaGraphDef& meta_graph_def,
-    const optional<int64>& servable_version,
+    const absl::optional<int64>& servable_version,
     const internal::PredictResponseTensorSerializationOption option,
-    Session* session, const PredictRequest& request,
-    PredictResponse* response) {
+    Session* session, const PredictRequest& request, PredictResponse* response,
+    const thread::ThreadPoolOptions& thread_pool_options) {
   // Validate signatures.
   const string signature_name = request.model_spec().signature_name().empty()
                                     ? kDefaultServingSignatureDefKey
@@ -209,7 +209,7 @@ Status RunPredict(
   RunMetadata run_metadata;
   TF_RETURN_IF_ERROR(session->Run(run_options, input_tensors,
                                   output_tensor_names, {}, &outputs,
-                                  &run_metadata));
+                                  &run_metadata, thread_pool_options));
 
   return PostProcessPredictionResult(output_tensor_aliases, outputs, option,
                                      response);
@@ -218,12 +218,14 @@ Status RunPredict(
 
 Status RunPredict(const RunOptions& run_options,
                   const MetaGraphDef& meta_graph_def,
-                  const optional<int64>& servable_version, Session* session,
-                  const PredictRequest& request, PredictResponse* response) {
+                  const absl::optional<int64>& servable_version,
+                  Session* session, const PredictRequest& request,
+                  PredictResponse* response,
+                  const thread::ThreadPoolOptions& thread_pool_options) {
   return internal::RunPredict(
       run_options, meta_graph_def, servable_version,
       internal::PredictResponseTensorSerializationOption::kAsProtoField,
-      session, request, response);
+      session, request, response, thread_pool_options);
 }
 
 }  // namespace serving

@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
+#include "tensorflow/core/lib/monitoring/gauge.h"
 #include "tensorflow_serving/core/loader.h"
 #include "tensorflow_serving/core/servable_data.h"
 #include "tensorflow_serving/core/test_util/session_test_util.h"
@@ -33,9 +34,10 @@ limitations under the License.
 #include "tensorflow_serving/resources/resource_values.h"
 #include "tensorflow_serving/resources/resources.pb.h"
 #include "tensorflow_serving/servables/tensorflow/bundle_factory_test_util.h"
+#include "tensorflow_serving/servables/tensorflow/saved_model_bundle_source_adapter.pb.h"
 #include "tensorflow_serving/servables/tensorflow/session_bundle_config.pb.h"
-#include "tensorflow_serving/servables/tensorflow/session_bundle_source_adapter.pb.h"
 #include "tensorflow_serving/test_util/test_util.h"
+#include "tensorflow_serving/util/oss_or_google.h"
 
 namespace tensorflow {
 namespace serving {
@@ -56,18 +58,18 @@ class SavedModelBundleSourceAdapterTest
 
     ram_resource_ = resource_util_->CreateBoundResource(
         device_types::kMain, resource_kinds::kRamBytes);
-    config_.mutable_config()->set_enable_model_warmup(EnableWarmup());
+    config_.mutable_legacy_config()->set_enable_model_warmup(EnableWarmup());
     if (EnableNumRequestIterations()) {
-      config_.mutable_config()
+      config_.mutable_legacy_config()
           ->mutable_model_warmup_options()
           ->mutable_num_request_iterations()
           ->set_value(2);
     }
 
-    config_.mutable_config()->set_enable_session_metadata(
+    config_.mutable_legacy_config()->set_enable_session_metadata(
         EnableSessionMetadata());
 
-    config_.mutable_config()->set_session_target(
+    config_.mutable_legacy_config()->set_session_target(
         test_util::kNewSessionHookSessionTargetPrefix);
     test_util::SetNewSessionHook([&](const SessionOptions& session_options) {
       EXPECT_EQ(EnableSessionMetadata(),
@@ -118,7 +120,8 @@ class SavedModelBundleSourceAdapterTest
     resource_util_->SetQuantity(
         ram_resource_,
         resource_util_->GetQuantity(ram_resource_, first_resource_estimate) -
-            config_.config().experimental_transient_ram_bytes_during_load(),
+            config_.legacy_config()
+                .experimental_transient_ram_bytes_during_load(),
         &expected_post_load_resource_estimate);
     ResourceAllocation actual_post_load_resource_estimate;
     TF_ASSERT_OK(
@@ -138,19 +141,43 @@ class SavedModelBundleSourceAdapterTest
 
   std::unique_ptr<ResourceUtil> resource_util_;
   Resource ram_resource_;
-  SessionBundleSourceAdapterConfig config_;
+  SavedModelBundleSourceAdapterConfig config_;
 };
 
 TEST_P(SavedModelBundleSourceAdapterTest, Basic) {
-  config_.mutable_config()->set_experimental_transient_ram_bytes_during_load(
-      42);
+  config_.mutable_legacy_config()
+      ->set_experimental_transient_ram_bytes_during_load(42);
 
   TestSavedModelBundleSourceAdapter(test_util::GetTestSavedModelPath());
 }
 
 TEST_P(SavedModelBundleSourceAdapterTest, BackwardCompatibility) {
+  if (IsTensorflowServingOSS()) {
+    return;
+  }
   TestSavedModelBundleSourceAdapter(
       test_util::GetTestSessionBundleExportPath());
+}
+
+TEST_P(SavedModelBundleSourceAdapterTest, MLMetadata) {
+  if (!EnableSessionMetadata()) return;
+  TestSavedModelBundleSourceAdapter(test_util::TestSrcDirPath(
+      strings::StrCat("/servables/tensorflow/testdata/",
+                      "saved_model_half_plus_two_mlmd/00000123")));
+  auto* collection_registry = monitoring::CollectionRegistry::Default();
+  monitoring::CollectionRegistry::CollectMetricsOptions options;
+  const std::unique_ptr<monitoring::CollectedMetrics> collected_metrics =
+      collection_registry->CollectMetrics(options);
+  const monitoring::PointSet& lps =
+      *collected_metrics->point_set_map.at("/tensorflow/serving/mlmd_map");
+
+  EXPECT_EQ(1, lps.points.size());
+  EXPECT_EQ(2, lps.points[0]->labels.size());
+  EXPECT_EQ("model_name", lps.points[0]->labels[0].name);
+  EXPECT_EQ("name", lps.points[0]->labels[0].value);
+  EXPECT_EQ("version", lps.points[0]->labels[1].name);
+  EXPECT_EQ("42", lps.points[0]->labels[1].value);
+  EXPECT_EQ("test_mlmd_uuid", lps.points[0]->string_value);
 }
 
 // Test all SavedModelBundleSourceAdapterTest test cases with

@@ -1,5 +1,11 @@
 # Description: Tensorflow Serving APIs.
 
+load("//tensorflow_serving:serving.bzl", "serving_proto_library")
+load("//tensorflow_serving:serving.bzl", "serving_proto_library_py")
+load("//tensorflow_serving:serving.bzl", "serving_go_grpc_library")
+load("//tensorflow_serving:serving.bzl", "serving_tensorflow_proto_dep")
+load("@org_tensorflow//tensorflow/core/platform:build_config.bzl", "tf_jspb_proto_library", "tf_pyclif_proto_library")
+
 package(
     default_visibility = ["//visibility:public"],
     features = ["-layering_check"],
@@ -18,11 +24,6 @@ filegroup(
     ),
 )
 
-load("//tensorflow_serving:serving.bzl", "serving_proto_library")
-load("//tensorflow_serving:serving.bzl", "serving_proto_library_py")
-load("//tensorflow_serving:serving.bzl", "serving_go_grpc_library")
-load("@org_tensorflow//tensorflow/core:platform/default/build_config.bzl", "tf_jspb_proto_library", "tf_pyclif_proto_library")
-
 serving_proto_library(
     name = "get_model_metadata_proto",
     srcs = ["get_model_metadata.proto"],
@@ -30,7 +31,9 @@ serving_proto_library(
     deps = [
         ":model_proto",
         "@com_google_protobuf//:cc_wkt_protos",
-        "@org_tensorflow//tensorflow/core:protos_all_cc",
+        serving_tensorflow_proto_dep(
+            "@org_tensorflow//tensorflow/core:protos_all",
+        ),
     ],
 )
 
@@ -49,7 +52,9 @@ serving_proto_library(
     srcs = ["input.proto"],
     cc_api_version = 2,
     deps = [
-        "@org_tensorflow//tensorflow/core:protos_all_cc",
+        serving_tensorflow_proto_dep(
+            "@org_tensorflow//tensorflow/core:protos_all",
+        ),
     ],
 )
 
@@ -106,7 +111,9 @@ serving_proto_library(
     cc_api_version = 2,
     deps = [
         ":model_proto",
-        "@org_tensorflow//tensorflow/core:protos_all_cc",
+        serving_tensorflow_proto_dep(
+            "@org_tensorflow//tensorflow/core:protos_all",
+        ),
     ],
 )
 
@@ -362,7 +369,9 @@ serving_proto_library(
     cc_api_version = 2,
     deps = [
         ":model_proto",
-        "@org_tensorflow//tensorflow/core:protos_all_cc",
+        serving_tensorflow_proto_dep(
+            "@org_tensorflow//tensorflow/core:protos_all",
+        ),
     ],
 )
 
@@ -386,7 +395,7 @@ cc_library(
     name = "classifier",
     hdrs = ["classifier.h"],
     deps = [
-        ":classification_proto",
+        ":classification_cc_proto",
         "@org_tensorflow//tensorflow/core:lib",
     ],
 )
@@ -395,7 +404,7 @@ cc_library(
     name = "regressor",
     hdrs = ["regressor.h"],
     deps = [
-        ":regression_proto",
+        ":regression_cc_proto",
         "@org_tensorflow//tensorflow/core:lib",
     ],
 )

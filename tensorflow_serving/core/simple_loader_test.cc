@@ -20,11 +20,11 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 #include "absl/memory/memory.h"
-#include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/strings/strcat.h"
+#include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow_serving/core/servable_data.h"
 #include "tensorflow_serving/core/servable_id.h"
 #include "tensorflow_serving/test_util/test_util.h"
@@ -179,10 +179,10 @@ TYPED_TEST(SimpleLoaderTest, ResourceEstimationWithPostLoadRelease) {
         *estimate = pre_load_resources;
         return Status::OK();
       },
-      [&post_load_resources](ResourceAllocation* estimate) {
+      absl::make_optional([&post_load_resources](ResourceAllocation* estimate) {
         *estimate = post_load_resources;
         return Status::OK();
-      });
+      }));
 
   // Run it twice, to exercise memoization.
   for (int i = 0; i < 2; ++i) {

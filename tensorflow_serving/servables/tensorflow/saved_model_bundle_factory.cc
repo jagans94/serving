@@ -15,16 +15,19 @@ limitations under the License.
 
 #include "tensorflow_serving/servables/tensorflow/saved_model_bundle_factory.h"
 
+#include "absl/strings/string_view.h"
 #include "tensorflow/cc/saved_model/tag_constants.h"
-#include "tensorflow/contrib/session_bundle/bundle_shim.h"
 #include "tensorflow/core/framework/tensor.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/protobuf/named_tensor.pb.h"
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow_serving/servables/tensorflow/bundle_factory_util.h"
 #include "tensorflow_serving/servables/tensorflow/curried_session.h"
+#include "tensorflow_serving/servables/tensorflow/tflite_session.h"
+#include "tensorflow_serving/session_bundle/session_bundle_util.h"
 
 namespace tensorflow {
 namespace serving {
@@ -57,6 +60,37 @@ Status ParseFixedInputTensors(
   return Status::OK();
 }
 
+// TODO(b/140959776): Move this upstream alongside `kSavedModelFilenamePb`.
+const char kTfLiteModelFilename[] = "model.tflite";
+
+Status LoadTfLiteModel(const string& model_dir, SavedModelBundle* bundle) {
+  std::unique_ptr<TfLiteSession> session;
+
+  const string& fname = io::JoinPath(model_dir, kTfLiteModelFilename);
+  uint64 size;
+  TF_RETURN_IF_ERROR(Env::Default()->GetFileSize(fname, &size));
+
+  std::unique_ptr<RandomAccessFile> file;
+  TF_RETURN_IF_ERROR(Env::Default()->NewRandomAccessFile(fname, &file));
+
+  string model_bytes;
+  model_bytes.resize(size);
+  absl::string_view sv;
+  TF_RETURN_IF_ERROR(file->Read(0, size, &sv, &model_bytes[0]));
+
+  std::unique_ptr<TfLiteSession> tflite_session;
+  TF_RETURN_IF_ERROR(
+      TfLiteSession::Create(std::move(model_bytes), &tflite_session,
+                            bundle->meta_graph_def.mutable_signature_def()));
+  bundle->session = std::move(tflite_session);
+  return Status::OK();
+}
+
+bool TfLiteModelFound(const string& model_dir) {
+  const string& fname = io::JoinPath(model_dir, kTfLiteModelFilename);
+  return Env::Default()->FilesExist({fname}, nullptr);
+}
+
 }  // namespace
 
 Status SavedModelBundleFactory::Create(
@@ -73,7 +107,8 @@ Status SavedModelBundleFactory::Create(
 
 Status SavedModelBundleFactory::EstimateResourceRequirement(
     const string& path, ResourceAllocation* estimate) const {
-  return EstimateResourceFromPath(path, estimate);
+  return EstimateResourceFromPath(
+      path, config_.resource_estimation_uses_validation_result(), estimate);
 }
 
 Status SavedModelBundleFactory::CreateSavedModelBundleWithMetadata(
@@ -93,8 +128,8 @@ Status SavedModelBundleFactory::InternalCreateSavedModelBundle(
   bundle->reset(new SavedModelBundle);
   std::unordered_set<string> saved_model_tags(
       config_.saved_model_tags().begin(), config_.saved_model_tags().end());
-  // Defaults to loading the meta graph def corresponding to the `serve` tag if
-  // no `saved_model_tags` are specified.
+  // Defaults to loading the meta graph def corresponding to the `serve` tag
+  // if no `saved_model_tags` are specified.
   if (saved_model_tags.empty()) {
     saved_model_tags.insert(kSavedModelTagServe);
   }
@@ -109,9 +144,13 @@ Status SavedModelBundleFactory::InternalCreateSavedModelBundle(
     return result;
   }();
 
-  TF_RETURN_IF_ERROR(LoadSessionBundleOrSavedModelBundle(
-      session_options, GetRunOptions(config_), path, saved_model_tags,
-      bundle->get()));
+  if (config_.prefer_tflite_model() && TfLiteModelFound(path)) {
+    TF_RETURN_IF_ERROR(LoadTfLiteModel(path, bundle->get()));
+  } else {
+    TF_RETURN_IF_ERROR(session_bundle::LoadSessionBundleOrSavedModelBundle(
+        session_options, GetRunOptions(config_), path, saved_model_tags,
+        bundle->get()));
+  }
   if (!config_.experimental_fixed_input_tensors().empty()) {
     LOG(INFO) << "Wrapping session to inject fixed input tensors";
     std::vector<std::pair<string, Tensor>> fixed_input_tensors;
@@ -138,8 +177,8 @@ Status SavedModelBundleFactory::InternalCreateSavedModelBundle(
       return errors::Internal("batch_scheduler_ not set");
     }
     // Enable batching of requests to any one signature_def in the SavedModel.
-    // Note that in the future, the plan is to enable explicit configuration of
-    // the one or many SignatureDefs to enable.
+    // Note that in the future, the plan is to enable explicit configuration
+    // of the one or many SignatureDefs to enable.
     const std::vector<SignatureDef> signatures = GetSignatureDefs(**bundle);
     return WrapSessionForBatching(config_.batching_parameters(),
                                   batch_scheduler_, signatures,

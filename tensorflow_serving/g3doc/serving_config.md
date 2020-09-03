@@ -194,7 +194,7 @@ config file, as described [above](#reloading-model-server-configuration).
 
 If you would like to assign a label to a version that is not yet loaded (for ex.
 by supplying both the model version and the label at startup time) then you must
-set the `--alow_version_labels_for_unavailable_models` flag to true, which
+set the `--allow_version_labels_for_unavailable_models` flag to true, which
 allows new labels to be assigned to model versions that are not loaded yet.
 
 Please note that this applies only to new version labels (i.e. ones not assigned
@@ -207,6 +207,20 @@ version label, you must assign it only to already-loaded versions. For example,
 if you would like to move a label from pointing to version N to version N+1, you
 may first submit a config containing version N and N+1, and then submit a config
 that contains version N+1, the label pointing to N+1 and no version N.
+
+#### REST Usage
+
+If you're using the REST API surface to make inference requests, instead of
+using
+
+`/v1/models/<model name>/versions/<version number>`
+
+simply request a version using a label by structuring your request path like so
+
+`/v1/models/<model name>/labels/<version label>`.
+
+Note that version label is restricted to a sequence of Word characters, composed
+of alphanumeral characters and underscores (i.e. `[a-zA-Z0-9_]+`).
 
 ## Monitoring Configuration
 
@@ -237,7 +251,7 @@ to realize better throughput. The scheduling for this batching is done globally
 for all models and model versions on the server to ensure the best possible
 utilization of the underlying resources no matter how many models or model
 versions are currently being served by the server
-([more details](../batching/README.md#servers-with-multiple-models-model-versions-or-subtasks)).
+([more details](http://github.com/tensorflow/serving/tree/master/tensorflow_serving/batching/README.md#servers-with-multiple-models-model-versions-or-subtasks)).
 You may enable this behavior by setting the `--enable_batching` flag and control
 it by passing a config to the `--batching_parameters_file` flag.
 
@@ -250,16 +264,17 @@ max_enqueued_batches { value: 1000000 }
 num_batch_threads { value: 8 }
 ```
 
-Please refer to the [batching guide](../batching/README.md) for an in-depth
-discussion and refer to the
-[section on parameters](../batching/README.md#batch-scheduling-parameters-and-tuning)
+Please refer to the
+[batching guide](http://github.com/tensorflow/serving/tree/master/tensorflow_serving/batching/README.md)
+for an in-depth discussion and refer to the
+[section on parameters](http://github.com/tensorflow/serving/tree/master/tensorflow_serving/batching/README.md#batch-scheduling-parameters-and-tuning)
 to understand how to set the parameters.
 
 ## Miscellaneous Flags
 
 In addition to the flags covered so far in the guide, here we list a few other
 notable ones. For a complete list, please refer to the
-[source code](../model_servers/main.cc#L59).
+[source code](http://github.com/tensorflow/serving/tree/master/tensorflow_serving/model_servers/main.cc#L59).
 
 *   `--port`: Port to listen on for gRPC API
 *   `--rest_api_port`: Port to listen on for HTTP/REST API

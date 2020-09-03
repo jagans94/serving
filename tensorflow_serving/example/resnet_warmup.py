@@ -78,7 +78,7 @@ def main():
       request.model_spec.name = 'resnet'
       request.model_spec.signature_name = 'serving_default'
       request.inputs['image_bytes'].CopyFrom(
-          tf.contrib.util.make_tensor_proto(data, shape=[1]))
+          tf.make_tensor_proto(data, shape=[1]))
 
       log = prediction_log_pb2.PredictionLog(
           predict_log=prediction_log_pb2.PredictLog(request=request))

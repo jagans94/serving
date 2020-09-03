@@ -24,19 +24,19 @@ limitations under the License.
 #include "tensorflow_serving/resources/resource_values.h"
 #include "tensorflow_serving/resources/resources.pb.h"
 #include "tensorflow_serving/servables/tensorflow/bundle_factory_util.h"
+#include "tensorflow_serving/servables/tensorflow/machine_learning_metadata.h"
 #include "tensorflow_serving/servables/tensorflow/saved_model_bundle_factory.h"
 #include "tensorflow_serving/servables/tensorflow/saved_model_warmup.h"
-#include "tensorflow_serving/util/optional.h"
 
 namespace tensorflow {
 namespace serving {
 
 Status SavedModelBundleSourceAdapter::Create(
-    const SessionBundleSourceAdapterConfig& config,
+    const SavedModelBundleSourceAdapterConfig& config,
     std::unique_ptr<SavedModelBundleSourceAdapter>* adapter) {
   std::unique_ptr<SavedModelBundleFactory> bundle_factory;
   TF_RETURN_IF_ERROR(
-      SavedModelBundleFactory::Create(config.config(), &bundle_factory));
+      SavedModelBundleFactory::Create(config.legacy_config(), &bundle_factory));
   adapter->reset(new SavedModelBundleSourceAdapter(std::move(bundle_factory)));
   return Status::OK();
 }
@@ -56,6 +56,8 @@ SavedModelBundleSourceAdapter::GetServableCreator(
                                   std::unique_ptr<SavedModelBundle>* bundle) {
       TF_RETURN_IF_ERROR(bundle_factory->CreateSavedModelBundleWithMetadata(
           metadata, path, bundle));
+      MaybePublishMLMDStreamz(path, metadata.servable_id.name,
+                              metadata.servable_id.version);
       if (bundle_factory->config().enable_model_warmup()) {
         return RunSavedModelWarmup(
             bundle_factory->config().model_warmup_options(),
@@ -109,20 +111,6 @@ Status SavedModelBundleSourceAdapter::Convert(const StoragePath& path,
   loader->reset(new SimpleLoader<SavedModelBundle>(
       servable_creator, resource_estimator, {post_load_resource_estimator}));
   return Status::OK();
-}
-
-std::function<Status(
-    std::unique_ptr<SourceAdapter<StoragePath, std::unique_ptr<Loader>>>*)>
-SavedModelBundleSourceAdapter::GetCreator(
-    const SessionBundleSourceAdapterConfig& config) {
-  return [config](std::unique_ptr<tensorflow::serving::SourceAdapter<
-                      StoragePath, std::unique_ptr<Loader>>>* source) {
-    std::unique_ptr<SavedModelBundleSourceAdapter> typed_source;
-    TF_RETURN_IF_ERROR(
-        SavedModelBundleSourceAdapter::Create(config, &typed_source));
-    *source = std::move(typed_source);
-    return Status::OK();
-  };
 }
 
 // Register the source adapter.
